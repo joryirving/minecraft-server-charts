@@ -36,11 +36,9 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Install Cosign
-        if: ${{ github.event_name != 'pull_request' }}
         uses: sigstore/cosign-installer@v3
 
       - name: Login to GitHub Container Registry
-        if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -52,65 +50,25 @@ jobs:
           helm repo add stable https://charts.helm.sh/stable
           helm repo update stable
 
-      # - name: Run chart-releaser
-      #   uses: helm/chart-releaser-action@v1.1.0
-      #   with:
-      #     charts_repo_url: https://itzg.github.io/minecraft-server-charts0
-      #   env:
-      #     CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Check if charts exist in GHCR and package if necessary
+      ## https://github.com/helm/chart-releaser-action/issues/107#issuecomment-2133797963
+      - name: Push Charts to GHCR
         run: |
-          mkdir -p packaged_charts
-
-          for chart_dir in $(find . -name 'Chart.yaml' -exec dirname {} \;); do
-            chart_name=$(yq '.name' "$chart_dir/Chart.yaml")
-            chart_version=$(yq '.version' "$chart_dir/Chart.yaml")
-
-            echo "Checking if chart $chart_name version $chart_version exists in GHCR..."
-
-            GHCR_API="https://api.github.com/orgs/${{ github.repository_owner }}/packages/container/$chart_name/versions"
-            exists=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github.v3+json" "$GHCR_API" | jq -r --arg ver "$chart_version" '[.[] | select(.metadata.container.tags[] == $ver)] | length')
-
-            if [[ "$exists" -gt 0 ]]; then
-              echo "Chart $chart_name version $chart_version already exists in GHCR. Skipping packaging."
-            else
-              echo "Chart $chart_name version $chart_version does not exist. Proceeding with packaging."
-              helm package "$chart_dir" --destination packaged_charts
+          for pkg in .cr-release-packages/*; do
+            if [ -z "${pkg:-}" ]; then
+              break
             fi
-          done
 
-      - name: Sign and Push new charts to GHCR
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          shopt -s nullglob
-          tgz_files=(packaged_charts/*.tgz)
-
-          if [ ${#tgz_files[@]} -eq 0 ]; then
-            echo "No new charts to push."
-            exit 0
-          fi
-
-          for chart in "${tgz_files[@]}"; do
-            chart_filename=$(basename "$chart" .tgz)
+            chart_filename=$(basename "$pkg" .tgz)
             chart_name=$(echo "$chart_filename" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')
             chart_version=$(echo "$chart_filename" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+$')
 
-            if [[ -z "$chart_name" || -z "$chart_version" ]]; then
-              echo "Failed to extract chart name or version from $chart_filename"
-              exit 1
-            fi
-
-            echo "Pushing chart $chart_name version $chart_version..."
-            push_output=$(helm push "$chart" oci://ghcr.io/${{ github.repository }} 2>&1)
-
+            push_output=$(helm push "${pkg}" oci://ghcr.io/${{ github.repository }}/charts 2>&1)
+            
             digest=$(echo "$push_output" | grep -oE 'sha256:[a-f0-9]{64}')
-            if [[ -z "$digest" ]]; then
-              echo "Failed to extract digest for $chart_name:$chart_version"
-              exit 1
-            fi
-
-            echo "Successfully pushed $chart_name:$chart_version with digest $digest"
-            echo "Signing chart $chart_name with digest $digest..."
-            cosign sign --yes "oci://ghcr.io/${{ github.repository }}/$chart_name@$digest"
+            cosign sign --yes "oci://ghcr.io/${{ github.repository }}/charts/$chart_name@$digest"
           done
