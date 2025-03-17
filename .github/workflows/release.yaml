@@ -10,9 +10,9 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
-      id-token: write # needed for signing the images with GitHub OIDC Token
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
