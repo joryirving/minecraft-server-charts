@@ -72,5 +72,5 @@ jobs:
             push_output=$(helm push "${pkg}" oci://ghcr.io/${{ github.repository }}/charts 2>&1)
             
             digest=$(echo "$push_output" | grep -oE 'sha256:[a-f0-9]{64}')
-            cosign sign --yes "oci://ghcr.io/${{ github.repository }}/charts/$chart_name@$digest"
+            sudo cosign sign --yes "oci://ghcr.io/${{ github.repository }}/charts/$chart_name@$digest"
           done
